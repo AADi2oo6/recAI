@@ -58,7 +58,8 @@ fun FileBrowserScreen(
     uiState: FileBrowserUiState,
     modifier: Modifier = Modifier,
     onBackClick: () -> Unit = {},
-    onResetFolderClick: () -> Unit = {}
+    onResetFolderClick: () -> Unit = {},
+    onRecordingClick: (AudioFile) -> Unit = {}
 ) {
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -159,7 +160,10 @@ fun FileBrowserScreen(
                                 items = uiState.files,
                                 key = { it.uri.toString() }
                             ) { audioFile ->
-                                AudioFileItem(audioFile = audioFile)
+                                AudioFileItem(
+                                    audioFile = audioFile,
+                                    onClick = { onRecordingClick(audioFile) }
+                                )
                             }
                         }
                     }
@@ -172,7 +176,8 @@ fun FileBrowserScreen(
 @Composable
 fun AudioFileItem(
     audioFile: AudioFile,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit = {}
 ) {
     val metadata = audioFile.metadata
     val titleText = metadata?.callerName ?: "Unknown caller"
@@ -187,6 +192,7 @@ fun AudioFileItem(
     }.joinToString(" • ")
 
     Card(
+        onClick = onClick,
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)

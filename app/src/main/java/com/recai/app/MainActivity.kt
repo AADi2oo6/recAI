@@ -21,17 +21,20 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import com.recai.app.data.model.AudioFile
 import com.recai.app.data.storage.FileRepository
 import com.recai.app.data.storage.FolderPreferences
 import com.recai.app.ui.screens.FileBrowserScreen
 import com.recai.app.ui.screens.FileBrowserUiState
 import com.recai.app.ui.screens.HomeScreen
+import com.recai.app.ui.screens.RecordingDetailScreen
 import com.recai.app.ui.theme.RecAITheme
 import kotlinx.coroutines.launch
 
 private enum class Screen {
     HOME,
-    FILE_BROWSER
+    FILE_BROWSER,
+    RECORDING_DETAIL
 }
 
 class MainActivity : ComponentActivity() {
@@ -47,6 +50,7 @@ class MainActivity : ComponentActivity() {
 
                 // State
                 var currentScreen by remember { mutableStateOf(Screen.HOME) }
+                var selectedAudioFile by remember { mutableStateOf<AudioFile?>(null) }
                 val storedUriString by folderPreferences.folderUriFlow.collectAsState(initial = null)
                 var displayFolderName by remember { mutableStateOf<String?>(null) }
                 var fileBrowserState by remember { mutableStateOf<FileBrowserUiState>(FileBrowserUiState.Loading) }
@@ -65,15 +69,18 @@ class MainActivity : ComponentActivity() {
                                 displayFolderName = null
                                 folderPreferences.clearFolderUri()
                                 currentScreen = Screen.HOME
+                                selectedAudioFile = null
                             }
                         } catch (e: Exception) {
                             displayFolderName = null
                             folderPreferences.clearFolderUri()
                             currentScreen = Screen.HOME
+                            selectedAudioFile = null
                         }
                     } else {
                         displayFolderName = null
                         currentScreen = Screen.HOME
+                        selectedAudioFile = null
                     }
                 }
 
@@ -150,8 +157,30 @@ class MainActivity : ComponentActivity() {
                             onResetFolderClick = {
                                 currentScreen = Screen.HOME
                                 folderPickerLauncher.launch(null)
+                            },
+                            onRecordingClick = { audioFile ->
+                                selectedAudioFile = audioFile
+                                currentScreen = Screen.RECORDING_DETAIL
                             }
                         )
+                    }
+
+                    Screen.RECORDING_DETAIL -> {
+                        val audio = selectedAudioFile
+                        if (audio != null) {
+                            BackHandler {
+                                currentScreen = Screen.FILE_BROWSER
+                            }
+
+                            RecordingDetailScreen(
+                                audioFile = audio,
+                                onBackClick = {
+                                    currentScreen = Screen.FILE_BROWSER
+                                }
+                            )
+                        } else {
+                            currentScreen = Screen.FILE_BROWSER
+                        }
                     }
                 }
             }
