@@ -167,4 +167,78 @@ class PhoneNumberMatcherTest {
         val fallbackDisplay = conversation.callerName ?: "Unknown caller"
         assertEquals("Unknown caller", fallbackDisplay)
     }
+
+    @Test
+    fun test16_knownContactMatchingExistingRecording() {
+        val rec = createAudioFile("rec.mp3", "Darshan Roommate", "00919699177117", LocalDateTime.now())
+        val conversations = listOf(
+            createConversation("conv-1", "Darshan Roommate", "00919699177117", listOf(rec))
+        )
+        val incoming = "+91 96991 77117"
+        val match = conversations.firstOrNull { PhoneNumberMatcher.matches(it.phoneNumber, incoming) }
+        assertNotNull(match)
+        assertEquals("Darshan Roommate", match?.callerName)
+        assertEquals(1, match?.recordingCount)
+    }
+
+    @Test
+    fun test17_knownContactWithNoExistingRecording() {
+        // Contact is known to user or contacts list, but no conversation/recording exists in recAI folder
+        val conversations = listOf(
+            createConversation("conv-1", "Darshan Roommate", "00919699177117", emptyList())
+        )
+        val incomingOtherKnown = "+91 98220 12345"
+        val match = conversations.firstOrNull { PhoneNumberMatcher.matches(it.phoneNumber, incomingOtherKnown) }
+        assertNull(match)
+    }
+
+    @Test
+    fun test18_unknownNumberMatchingExistingRecording() {
+        // Caller has no name in contacts/recordings (unknown number), but recordings exist from past calls
+        val rec = createAudioFile("rec_raw.mp3", null, "00919529485776", LocalDateTime.now())
+        val conversations = listOf(
+            createConversation("conv-1", null, "00919529485776", listOf(rec))
+        )
+        val incoming = "9529485776"
+        val match = conversations.firstOrNull { PhoneNumberMatcher.matches(it.phoneNumber, incoming) }
+        assertNotNull(match)
+        assertNull(match?.callerName)
+        assertEquals(1, match?.recordingCount)
+    }
+
+    @Test
+    fun test19_unknownNumberWithNoExistingRecording() {
+        // Unknown incoming caller with zero past recordings
+        val conversations = listOf(
+            createConversation("conv-1", "Lab Hade", "00919529485776", listOf(
+                createAudioFile("rec.mp3", "Lab Hade", "00919529485776", LocalDateTime.now())
+            ))
+        )
+        val incoming = "+91 91111 22222"
+        val match = conversations.firstOrNull { PhoneNumberMatcher.matches(it.phoneNumber, incoming) }
+        assertNull(match)
+    }
+
+    @Test
+    fun test20_formattedIncomingNumberMatchingStoredRecording() {
+        val storedNumber = "00918830714901"
+        // Various formatted representations of incoming call numbers
+        assertTrue(PhoneNumberMatcher.matches(storedNumber, "+91 88307-14901"))
+        assertTrue(PhoneNumberMatcher.matches(storedNumber, "(+91) 88307 14901"))
+        assertTrue(PhoneNumberMatcher.matches(storedNumber, "+918830714901"))
+        assertTrue(PhoneNumberMatcher.matches(storedNumber, "8830714901"))
+        assertTrue(PhoneNumberMatcher.matches(storedNumber, "08830714901"))
+    }
+
+    @Test
+    fun test21_privateOrMissingIncomingNumberHandling() {
+        val storedNumber = "00918830714901"
+        assertFalse(PhoneNumberMatcher.matches(storedNumber, null))
+        assertFalse(PhoneNumberMatcher.matches(storedNumber, ""))
+        assertFalse(PhoneNumberMatcher.matches(storedNumber, "   "))
+        assertFalse(PhoneNumberMatcher.matches(storedNumber, "Private Number"))
+        assertFalse(PhoneNumberMatcher.matches(storedNumber, "UNKNOWN"))
+        assertFalse(PhoneNumberMatcher.matches(storedNumber, "RESTRICTED"))
+    }
 }
+

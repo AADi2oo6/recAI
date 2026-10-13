@@ -17,6 +17,9 @@ object PhoneNumberMatcher {
         // Normalize leading 00 exit code prefix if followed by international code
         if (digitsOnly.startsWith("00") && digitsOnly.length > 4) {
             digitsOnly = digitsOnly.substring(2)
+        } else if (digitsOnly.startsWith("0") && digitsOnly.length >= 10) {
+            // Strip leading single trunk prefix 0 before national number (e.g. 08830714901 -> 8830714901)
+            digitsOnly = digitsOnly.substring(1)
         }
 
         return digitsOnly

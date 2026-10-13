@@ -81,6 +81,16 @@ class MainActivity : ComponentActivity() {
                     mutableStateOf(checkCallScreeningRoleHeld())
                 }
 
+                // Notifications permission state
+                var isNotificationsAllowed by remember {
+                    mutableStateOf(checkNotificationPermissionGranted())
+                }
+
+                // Contacts permission state
+                var isContactsPermissionAllowed by remember {
+                    mutableStateOf(checkContactsPermissionGranted())
+                }
+
                 // Call screening role launcher
                 val roleLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.StartActivityForResult()
@@ -91,17 +101,21 @@ class MainActivity : ComponentActivity() {
                 // Notification permission launcher for Android 13+
                 val notificationPermissionLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.RequestPermission()
-                ) { /* Granted / Denied handled gracefully */ }
+                ) { isGranted ->
+                    isNotificationsAllowed = isGranted
+                }
 
+                // Contacts permission launcher
+                val contactsPermissionLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission()
+                ) { isGranted ->
+                    isContactsPermissionAllowed = isGranted
+                }
+
+                // One-time prompt for notifications on launch if not granted (Android 13+)
                 LaunchedEffect(Unit) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        if (ContextCompat.checkSelfPermission(
-                                context,
-                                android.Manifest.permission.POST_NOTIFICATIONS
-                            ) != PackageManager.PERMISSION_GRANTED
-                        ) {
-                            notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                        }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !isNotificationsAllowed) {
+                        notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                     }
                 }
 
@@ -215,6 +229,8 @@ class MainActivity : ComponentActivity() {
                             HomeScreen(
                                 selectedFolderName = displayFolderName,
                                 isCallScreeningRoleHeld = isCallScreeningRoleHeld,
+                                isNotificationsAllowed = isNotificationsAllowed,
+                                isContactsPermissionAllowed = isContactsPermissionAllowed,
                                 modifier = Modifier.padding(innerPadding),
                                 onSelectFolderClick = {
                                     folderPickerLauncher.launch(null)
@@ -225,6 +241,14 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onRequestCallScreeningRole = {
                                     requestCallScreeningRole(roleLauncher::launch)
+                                },
+                                onRequestContactsPermission = {
+                                    contactsPermissionLauncher.launch(android.Manifest.permission.READ_CONTACTS)
+                                },
+                                onRequestNotificationPermission = {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                        notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                    }
                                 }
                             )
                         }
@@ -299,6 +323,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // Refresh permission and role checks when user returns to app from system settings
+        // (state is handled inside setContent or on next recomposition)
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -313,6 +343,24 @@ class MainActivity : ComponentActivity() {
     private fun checkCallScreeningRoleHeld(): Boolean {
         val roleManager = getSystemService(RoleManager::class.java) ?: return false
         return roleManager.isRoleHeld(RoleManager.ROLE_CALL_SCREENING)
+    }
+
+    private fun checkNotificationPermissionGranted(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(
+                this,
+                android.Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+    }
+
+    private fun checkContactsPermissionGranted(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            this,
+            android.Manifest.permission.READ_CONTACTS
+        ) == PackageManager.PERMISSION_GRANTED
     }
 
     private fun requestCallScreeningRole(launcher: (Intent) -> Unit) {
