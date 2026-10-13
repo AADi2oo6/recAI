@@ -11,10 +11,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,9 +32,11 @@ import com.recai.app.ui.theme.RecAITheme
 @Composable
 fun HomeScreen(
     selectedFolderName: String?,
+    isCallScreeningRoleHeld: Boolean,
     modifier: Modifier = Modifier,
     onSelectFolderClick: () -> Unit = {},
-    onOpenFolderClick: () -> Unit = {}
+    onOpenFolderClick: () -> Unit = {},
+    onRequestCallScreeningRole: () -> Unit = {}
 ) {
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -66,13 +68,13 @@ fun HomeScreen(
                 textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(40.dp))
+            Spacer(modifier = Modifier.height(36.dp))
 
             // Select Folder Button
             Button(
                 onClick = onSelectFolderClick,
                 modifier = Modifier
-                    .fillMaxWidth(0.7f)
+                    .fillMaxWidth(0.75f)
                     .height(50.dp)
             ) {
                 Icon(
@@ -87,7 +89,7 @@ fun HomeScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Folder Selection Status & Open Folder action
             if (selectedFolderName != null) {
@@ -118,13 +120,13 @@ fun HomeScreen(
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
                     // Open Folder Button
                     FilledTonalButton(
                         onClick = onOpenFolderClick,
                         modifier = Modifier
-                            .fillMaxWidth(0.7f)
+                            .fillMaxWidth(0.75f)
                             .height(48.dp)
                     ) {
                         Text(
@@ -141,6 +143,31 @@ fun HomeScreen(
                     textAlign = TextAlign.Center
                 )
             }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // Call Screening Role Setup
+            if (!isCallScreeningRoleHeld) {
+                OutlinedButton(
+                    onClick = onRequestCallScreeningRole,
+                    modifier = Modifier
+                        .fillMaxWidth(0.75f)
+                        .height(46.dp)
+                ) {
+                    Text(
+                        text = "Enable Call Detection",
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Allows recAI to show caller recordings during incoming calls.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+            }
         }
     }
 }
@@ -149,22 +176,14 @@ fun HomeScreen(
 @Composable
 fun HomeScreenPreviewNoFolder() {
     RecAITheme(darkTheme = false) {
-        HomeScreen(selectedFolderName = null)
+        HomeScreen(selectedFolderName = null, isCallScreeningRoleHeld = false)
     }
 }
 
-@Preview(name = "Folder Selected", showBackground = true)
+@Preview(name = "Folder Selected with Role Enabled", showBackground = true)
 @Composable
 fun HomeScreenPreviewWithFolder() {
     RecAITheme(darkTheme = false) {
-        HomeScreen(selectedFolderName = "Recordings")
-    }
-}
-
-@Preview(name = "Dark Mode With Folder", showBackground = true)
-@Composable
-fun HomeScreenPreviewDarkWithFolder() {
-    RecAITheme(darkTheme = true) {
-        HomeScreen(selectedFolderName = "Recordings")
+        HomeScreen(selectedFolderName = "Recordings", isCallScreeningRoleHeld = true)
     }
 }

@@ -113,6 +113,19 @@ class FileRepository(private val context: Context? = null) {
     }
 
     /**
+     * Looks up an existing Conversation matching the given phone number using PhoneNumberMatcher.
+     */
+    suspend fun findConversationByPhoneNumber(
+        treeUri: Uri,
+        phoneNumber: String
+    ): com.recai.app.data.model.Conversation? {
+        val conversations = getConversations(treeUri).getOrNull() ?: return null
+        return conversations.firstOrNull { conv ->
+            com.recai.app.data.parser.PhoneNumberMatcher.matches(conv.phoneNumber, phoneNumber)
+        }
+    }
+
+    /**
      * Groups a list of AudioFiles into Conversations:
      * - Recordings with the same phone number are merged into one Conversation.
      * - The best available non-empty caller name is chosen for the Conversation.

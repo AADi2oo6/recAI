@@ -1,7 +1,10 @@
 package com.recai.app
 
+import android.app.role.RoleManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -21,8 +24,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import com.recai.app.data.model.AudioFile
 import com.recai.app.data.model.Conversation
+import com.recai.app.data.parser.PhoneNumberMatcher
 import com.recai.app.data.storage.FileRepository
 import com.recai.app.data.storage.FolderPreferences
 import com.recai.app.ui.screens.ConversationDetailScreen
@@ -41,9 +46,21 @@ private enum class Screen {
 }
 
 class MainActivity : ComponentActivity() {
+
+    companion object {
+        const val EXTRA_CONVERSATION_ID = "extra_conversation_id"
+        const val EXTRA_PHONE_NUMBER = "extra_phone_number"
+    }
+
+    private var targetConversationId: String? = null
+    private var targetPhoneNumber: String? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        extractIntentExtras(intent)
+
         setContent {
             RecAITheme {
                 val context = LocalContext.current
@@ -59,6 +76,35 @@ class MainActivity : ComponentActivity() {
                 var displayFolderName by remember { mutableStateOf<String?>(null) }
                 var conversationsState by remember { mutableStateOf<ConversationsUiState>(ConversationsUiState.Loading) }
 
+                // Call screening role state
+                var isCallScreeningRoleHeld by remember {
+                    mutableStateOf(checkCallScreeningRoleHeld())
+                }
+
+                // Call screening role launcher
+                val roleLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.StartActivityForResult()
+                ) {
+                    isCallScreeningRoleHeld = checkCallScreeningRoleHeld()
+                }
+
+                // Notification permission launcher for Android 13+
+                val notificationPermissionLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission()
+                ) { /* Granted / Denied handled gracefully */ }
+
+                LaunchedEffect(Unit) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        if (ContextCompat.checkSelfPermission(
+                                context,
+                                android.Manifest.permission.POST_NOTIFICATIONS
+                            ) != PackageManager.PERMISSION_GRANTED
+                        ) {
+                            notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    }
+                }
+
                 // Check stored URI accessibility whenever it changes
                 LaunchedEffect(storedUriString) {
                     val uriString = storedUriString
@@ -69,7 +115,6 @@ class MainActivity : ComponentActivity() {
                             if (name != null) {
                                 displayFolderName = name
                             } else {
-                                // Permission revoked or folder no longer accessible
                                 displayFolderName = null
                                 folderPreferences.clearFolderUri()
                                 currentScreen = Screen.HOME
@@ -92,7 +137,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 // Function to load and group recordings into conversations
-                fun loadConversations() {
+                fun loadConversations(onLoaded: ((List<Conversation>) -> Unit)? = null) {
                     val uriString = storedUriString ?: return
                     val uri = Uri.parse(uriString)
                     conversationsState = ConversationsUiState.Loading
@@ -101,11 +146,30 @@ class MainActivity : ComponentActivity() {
                         result.fold(
                             onSuccess = { convList ->
                                 conversationsState = ConversationsUiState.Success(convList)
-                                // If a conversation was currently open, refresh its data reference
-                                val currentConvId = selectedConversation?.id
-                                if (currentConvId != null) {
-                                    selectedConversation = convList.firstOrNull { it.id == currentConvId }
+
+                                // Handle intent deep-linking to conversation
+                                val deepConvId = targetConversationId
+                                val deepPhone = targetPhoneNumber
+                                if (deepConvId != null || deepPhone != null) {
+                                    val matched = convList.firstOrNull { conv ->
+                                        conv.id == deepConvId ||
+                                                (deepPhone != null && PhoneNumberMatcher.matches(conv.phoneNumber, deepPhone))
+                                    }
+                                    if (matched != null) {
+                                        selectedConversation = matched
+                                        currentScreen = Screen.CONVERSATION_DETAIL
+                                    } else {
+                                        currentScreen = Screen.CONVERSATIONS
+                                    }
+                                    targetConversationId = null
+                                    targetPhoneNumber = null
+                                } else {
+                                    val currentConvId = selectedConversation?.id
+                                    if (currentConvId != null) {
+                                        selectedConversation = convList.firstOrNull { it.id == currentConvId }
+                                    }
                                 }
+                                onLoaded?.invoke(convList)
                             },
                             onFailure = {
                                 conversationsState = ConversationsUiState.Inaccessible
@@ -113,6 +177,13 @@ class MainActivity : ComponentActivity() {
                                 displayFolderName = null
                             }
                         )
+                    }
+                }
+
+                // Handle deep link when app is opened from notification
+                LaunchedEffect(storedUriString, targetConversationId, targetPhoneNumber) {
+                    if (storedUriString != null && (targetConversationId != null || targetPhoneNumber != null)) {
+                        loadConversations()
                     }
                 }
 
@@ -143,6 +214,7 @@ class MainActivity : ComponentActivity() {
                         Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                             HomeScreen(
                                 selectedFolderName = displayFolderName,
+                                isCallScreeningRoleHeld = isCallScreeningRoleHeld,
                                 modifier = Modifier.padding(innerPadding),
                                 onSelectFolderClick = {
                                     folderPickerLauncher.launch(null)
@@ -150,6 +222,9 @@ class MainActivity : ComponentActivity() {
                                 onOpenFolderClick = {
                                     loadConversations()
                                     currentScreen = Screen.CONVERSATIONS
+                                },
+                                onRequestCallScreeningRole = {
+                                    requestCallScreeningRole(roleLauncher::launch)
                                 }
                             )
                         }
@@ -221,6 +296,30 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        extractIntentExtras(intent)
+    }
+
+    private fun extractIntentExtras(intent: Intent?) {
+        targetConversationId = intent?.getStringExtra(EXTRA_CONVERSATION_ID)
+        targetPhoneNumber = intent?.getStringExtra(EXTRA_PHONE_NUMBER)
+    }
+
+    private fun checkCallScreeningRoleHeld(): Boolean {
+        val roleManager = getSystemService(RoleManager::class.java) ?: return false
+        return roleManager.isRoleHeld(RoleManager.ROLE_CALL_SCREENING)
+    }
+
+    private fun requestCallScreeningRole(launcher: (Intent) -> Unit) {
+        val roleManager = getSystemService(RoleManager::class.java) ?: return
+        if (roleManager.isRoleAvailable(RoleManager.ROLE_CALL_SCREENING)) {
+            val intent = roleManager.createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING)
+            launcher(intent)
         }
     }
 }
