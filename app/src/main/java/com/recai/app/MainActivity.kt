@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -20,10 +21,18 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import com.recai.app.data.storage.FileRepository
 import com.recai.app.data.storage.FolderPreferences
+import com.recai.app.ui.screens.FileBrowserScreen
+import com.recai.app.ui.screens.FileBrowserUiState
 import com.recai.app.ui.screens.HomeScreen
 import com.recai.app.ui.theme.RecAITheme
 import kotlinx.coroutines.launch
+
+private enum class Screen {
+    HOME,
+    FILE_BROWSER
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -33,11 +42,14 @@ class MainActivity : ComponentActivity() {
             RecAITheme {
                 val context = LocalContext.current
                 val folderPreferences = remember { FolderPreferences(context) }
+                val fileRepository = remember { FileRepository(context) }
                 val coroutineScope = rememberCoroutineScope()
 
-                // Observe stored URI from DataStore
+                // State
+                var currentScreen by remember { mutableStateOf(Screen.HOME) }
                 val storedUriString by folderPreferences.folderUriFlow.collectAsState(initial = null)
                 var displayFolderName by remember { mutableStateOf<String?>(null) }
+                var fileBrowserState by remember { mutableStateOf<FileBrowserUiState>(FileBrowserUiState.Loading) }
 
                 // Check stored URI accessibility whenever it changes
                 LaunchedEffect(storedUriString) {
@@ -52,13 +64,36 @@ class MainActivity : ComponentActivity() {
                                 // Permission revoked or folder no longer accessible
                                 displayFolderName = null
                                 folderPreferences.clearFolderUri()
+                                currentScreen = Screen.HOME
                             }
                         } catch (e: Exception) {
                             displayFolderName = null
                             folderPreferences.clearFolderUri()
+                            currentScreen = Screen.HOME
                         }
                     } else {
                         displayFolderName = null
+                        currentScreen = Screen.HOME
+                    }
+                }
+
+                // Function to load audio files
+                fun loadAudioFiles() {
+                    val uriString = storedUriString ?: return
+                    val uri = Uri.parse(uriString)
+                    fileBrowserState = FileBrowserUiState.Loading
+                    coroutineScope.launch {
+                        val result = fileRepository.getAudioFiles(uri)
+                        result.fold(
+                            onSuccess = { files ->
+                                fileBrowserState = FileBrowserUiState.Success(files)
+                            },
+                            onFailure = {
+                                fileBrowserState = FileBrowserUiState.Inaccessible
+                                folderPreferences.clearFolderUri()
+                                displayFolderName = null
+                            }
+                        )
                     }
                 }
 
@@ -66,13 +101,11 @@ class MainActivity : ComponentActivity() {
                 val folderPickerLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.OpenDocumentTree()
                 ) { uri: Uri? ->
-                    // Handle user cancellation: if uri is null, do nothing and keep existing
                     if (uri != null) {
                         try {
                             val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION
                             context.contentResolver.takePersistableUriPermission(uri, takeFlags)
 
-                            // Validate and save
                             val name = folderPreferences.getAccessibleFolderName(uri)
                             if (name != null) {
                                 displayFolderName = name
@@ -81,20 +114,45 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         } catch (e: SecurityException) {
-                            // In case permission couldn't be persisted
                             e.printStackTrace()
                         }
                     }
                 }
 
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    HomeScreen(
-                        selectedFolderName = displayFolderName,
-                        modifier = Modifier.padding(innerPadding),
-                        onSelectFolderClick = {
-                            folderPickerLauncher.launch(null)
+                when (currentScreen) {
+                    Screen.HOME -> {
+                        Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                            HomeScreen(
+                                selectedFolderName = displayFolderName,
+                                modifier = Modifier.padding(innerPadding),
+                                onSelectFolderClick = {
+                                    folderPickerLauncher.launch(null)
+                                },
+                                onOpenFolderClick = {
+                                    loadAudioFiles()
+                                    currentScreen = Screen.FILE_BROWSER
+                                }
+                            )
                         }
-                    )
+                    }
+
+                    Screen.FILE_BROWSER -> {
+                        BackHandler {
+                            currentScreen = Screen.HOME
+                        }
+
+                        FileBrowserScreen(
+                            folderName = displayFolderName ?: "Recordings",
+                            uiState = fileBrowserState,
+                            onBackClick = {
+                                currentScreen = Screen.HOME
+                            },
+                            onResetFolderClick = {
+                                currentScreen = Screen.HOME
+                                folderPickerLauncher.launch(null)
+                            }
+                        )
+                    }
                 }
             }
         }

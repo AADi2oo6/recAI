@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -31,7 +33,8 @@ import com.recai.app.ui.theme.RecAITheme
 fun HomeScreen(
     selectedFolderName: String?,
     modifier: Modifier = Modifier,
-    onSelectFolderClick: () -> Unit = {}
+    onSelectFolderClick: () -> Unit = {},
+    onOpenFolderClick: () -> Unit = {}
 ) {
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -86,7 +89,7 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Folder Selection Status
+            // Folder Selection Status & Open Folder action
             if (selectedFolderName != null) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally
@@ -112,6 +115,21 @@ fun HomeScreen(
                             color = MaterialTheme.colorScheme.onBackground,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // Open Folder Button
+                    FilledTonalButton(
+                        onClick = onOpenFolderClick,
+                        modifier = Modifier
+                            .fillMaxWidth(0.7f)
+                            .height(48.dp)
+                    ) {
+                        Text(
+                            text = "Open Folder",
+                            style = MaterialTheme.typography.labelLarge
                         )
                     }
                 }
