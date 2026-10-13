@@ -77,13 +77,15 @@ class FileRepository(private val context: Context) {
                     // Check if file is supported audio by extension or mimeType
                     if (isSupportedAudioFile(displayName, mimeType)) {
                         val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocId)
+                        val metadata = com.recai.app.data.parser.RecordingFilenameParser.parse(displayName)
                         audioFiles.add(
                             AudioFile(
                                 name = displayName,
                                 uri = fileUri,
                                 mimeType = mimeType,
                                 size = size,
-                                lastModified = lastModified
+                                lastModified = lastModified,
+                                metadata = metadata
                             )
                         )
                     }

@@ -37,8 +37,11 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.recai.app.R
 import com.recai.app.data.model.AudioFile
+import com.recai.app.data.model.RecordingMetadata
 import com.recai.app.ui.theme.RecAITheme
 import java.text.SimpleDateFormat
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.Locale
 
@@ -150,7 +153,7 @@ fun FileBrowserScreen(
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             items(
                                 items = uiState.files,
@@ -171,6 +174,18 @@ fun AudioFileItem(
     audioFile: AudioFile,
     modifier: Modifier = Modifier
 ) {
+    val metadata = audioFile.metadata
+    val titleText = metadata?.callerName ?: "Unknown caller"
+    val phoneNumber = metadata?.phoneNumber
+    val dateTimeText = formatRecordingDateTime(metadata?.recordingDateTime, audioFile.lastModified)
+
+    val extension = audioFile.name.substringAfterLast('.', "").uppercase(Locale.ROOT)
+    val formattedSize = formatFileSize(audioFile.size)
+    val fileDetailsText = buildList {
+        if (extension.isNotBlank()) add(extension)
+        if (formattedSize.isNotBlank()) add(formattedSize)
+    }.joinToString(" • ")
+
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -195,37 +210,66 @@ fun AudioFileItem(
             Column(
                 modifier = Modifier.weight(1f)
             ) {
+                // Line 1: Caller Name or Fallback
                 Text(
-                    text = audioFile.name,
+                    text = titleText,
                     style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium,
+                    fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
 
-                Spacer(modifier = Modifier.height(4.dp))
+                // Line 2: Phone number (omitted if null)
+                if (!phoneNumber.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = phoneNumber,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
 
-                val extension = audioFile.name.substringAfterLast('.', "").uppercase(Locale.ROOT)
-                val formattedSize = formatFileSize(audioFile.size)
-                val formattedDate = formatLastModified(audioFile.lastModified)
+                // Line 3: Date & Time (parsed recording timestamp or fallback to file modified date)
+                if (dateTimeText.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = dateTimeText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
 
-                val details = buildList {
-                    if (extension.isNotBlank()) add(extension)
-                    if (formattedSize.isNotBlank()) add(formattedSize)
-                    if (formattedDate.isNotBlank()) add(formattedDate)
-                }.joinToString(" • ")
-
-                Text(
-                    text = details,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                // Line 4: Format & File Size (e.g. MP3 • 129 KB)
+                if (fileDetailsText.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = fileDetailsText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
     }
+}
+
+private fun formatRecordingDateTime(dateTime: LocalDateTime?, lastModifiedFallback: Long): String {
+    if (dateTime != null) {
+        val formatter = DateTimeFormatter.ofPattern("MMM d, yyyy • h:mm a", Locale.getDefault())
+        return dateTime.format(formatter)
+    }
+    if (lastModifiedFallback > 0) {
+        val formatter = SimpleDateFormat("MMM d, yyyy • h:mm a", Locale.getDefault())
+        return formatter.format(Date(lastModifiedFallback))
+    }
+    return ""
 }
 
 private fun formatFileSize(bytes: Long): String {
@@ -236,17 +280,12 @@ private fun formatFileSize(bytes: Long): String {
     return when {
         gb >= 1.0 -> String.format(Locale.US, "%.1f GB", gb)
         mb >= 1.0 -> String.format(Locale.US, "%.1f MB", mb)
-        else -> String.format(Locale.US, "%.0f KB", kb)
+        kb >= 1.0 -> String.format(Locale.US, "%.0f KB", kb)
+        else -> "$bytes B"
     }
 }
 
-private fun formatLastModified(timestamp: Long): String {
-    if (timestamp <= 0) return ""
-    val formatter = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
-    return formatter.format(Date(timestamp))
-}
-
-@Preview(name = "Success State", showBackground = true)
+@Preview(name = "Success State with Metadata", showBackground = true)
 @Composable
 fun FileBrowserPreviewSuccess() {
     RecAITheme {
@@ -254,9 +293,32 @@ fun FileBrowserPreviewSuccess() {
             folderName = "call_rec",
             uiState = FileBrowserUiState.Success(
                 listOf(
-                    AudioFile("call_001.m4a", android.net.Uri.EMPTY, "audio/mp4", 8400000L, 1728800000000L),
-                    AudioFile("call_002.wav", android.net.Uri.EMPTY, "audio/wav", 31200000L, 1728700000000L),
-                    AudioFile("call_003.mp3", android.net.Uri.EMPTY, "audio/mpeg", 5700000L, 1728600000000L)
+                    AudioFile(
+                        name = "Darshan Roommate(0091XXXXXXXXXX)_20261013200200.mp3",
+                        uri = android.net.Uri.EMPTY,
+                        mimeType = "audio/mpeg",
+                        size = 132096L,
+                        lastModified = 1728800000000L,
+                        metadata = RecordingMetadata(
+                            callerName = "Darshan Roommate",
+                            phoneNumber = "0091XXXXXXXXXX",
+                            recordingDateTime = LocalDateTime.of(2026, 10, 13, 20, 2),
+                            originalFileName = "Darshan Roommate(0091XXXXXXXXXX)_20261013200200.mp3"
+                        )
+                    ),
+                    AudioFile(
+                        name = "Recording_20261013153000.wav",
+                        uri = android.net.Uri.EMPTY,
+                        mimeType = "audio/wav",
+                        size = 31200000L,
+                        lastModified = 1728700000000L,
+                        metadata = RecordingMetadata(
+                            callerName = "Recording",
+                            phoneNumber = null,
+                            recordingDateTime = LocalDateTime.of(2026, 10, 13, 15, 30),
+                            originalFileName = "Recording_20261013153000.wav"
+                        )
+                    )
                 )
             )
         )
