@@ -78,7 +78,10 @@ fun RecordingDetailScreen(
     }
 
     DisposableEffect(audioFile.uri) {
-        playerController.prepare(audioFile.uri)
+        val uri = audioFile.uri
+        if (uri != null) {
+            playerController.prepare(uri)
+        }
         onDispose {
             playerController.release()
         }

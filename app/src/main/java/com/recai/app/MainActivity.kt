@@ -22,10 +22,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.recai.app.data.model.AudioFile
+import com.recai.app.data.model.Conversation
 import com.recai.app.data.storage.FileRepository
 import com.recai.app.data.storage.FolderPreferences
-import com.recai.app.ui.screens.FileBrowserScreen
-import com.recai.app.ui.screens.FileBrowserUiState
+import com.recai.app.ui.screens.ConversationDetailScreen
+import com.recai.app.ui.screens.ConversationsScreen
+import com.recai.app.ui.screens.ConversationsUiState
 import com.recai.app.ui.screens.HomeScreen
 import com.recai.app.ui.screens.RecordingDetailScreen
 import com.recai.app.ui.theme.RecAITheme
@@ -33,7 +35,8 @@ import kotlinx.coroutines.launch
 
 private enum class Screen {
     HOME,
-    FILE_BROWSER,
+    CONVERSATIONS,
+    CONVERSATION_DETAIL,
     RECORDING_DETAIL
 }
 
@@ -50,10 +53,11 @@ class MainActivity : ComponentActivity() {
 
                 // State
                 var currentScreen by remember { mutableStateOf(Screen.HOME) }
+                var selectedConversation by remember { mutableStateOf<Conversation?>(null) }
                 var selectedAudioFile by remember { mutableStateOf<AudioFile?>(null) }
                 val storedUriString by folderPreferences.folderUriFlow.collectAsState(initial = null)
                 var displayFolderName by remember { mutableStateOf<String?>(null) }
-                var fileBrowserState by remember { mutableStateOf<FileBrowserUiState>(FileBrowserUiState.Loading) }
+                var conversationsState by remember { mutableStateOf<ConversationsUiState>(ConversationsUiState.Loading) }
 
                 // Check stored URI accessibility whenever it changes
                 LaunchedEffect(storedUriString) {
@@ -69,34 +73,42 @@ class MainActivity : ComponentActivity() {
                                 displayFolderName = null
                                 folderPreferences.clearFolderUri()
                                 currentScreen = Screen.HOME
+                                selectedConversation = null
                                 selectedAudioFile = null
                             }
                         } catch (e: Exception) {
                             displayFolderName = null
                             folderPreferences.clearFolderUri()
                             currentScreen = Screen.HOME
+                            selectedConversation = null
                             selectedAudioFile = null
                         }
                     } else {
                         displayFolderName = null
                         currentScreen = Screen.HOME
+                        selectedConversation = null
                         selectedAudioFile = null
                     }
                 }
 
-                // Function to load audio files
-                fun loadAudioFiles() {
+                // Function to load and group recordings into conversations
+                fun loadConversations() {
                     val uriString = storedUriString ?: return
                     val uri = Uri.parse(uriString)
-                    fileBrowserState = FileBrowserUiState.Loading
+                    conversationsState = ConversationsUiState.Loading
                     coroutineScope.launch {
-                        val result = fileRepository.getAudioFiles(uri)
+                        val result = fileRepository.getConversations(uri)
                         result.fold(
-                            onSuccess = { files ->
-                                fileBrowserState = FileBrowserUiState.Success(files)
+                            onSuccess = { convList ->
+                                conversationsState = ConversationsUiState.Success(convList)
+                                // If a conversation was currently open, refresh its data reference
+                                val currentConvId = selectedConversation?.id
+                                if (currentConvId != null) {
+                                    selectedConversation = convList.firstOrNull { it.id == currentConvId }
+                                }
                             },
                             onFailure = {
-                                fileBrowserState = FileBrowserUiState.Inaccessible
+                                conversationsState = ConversationsUiState.Inaccessible
                                 folderPreferences.clearFolderUri()
                                 displayFolderName = null
                             }
@@ -136,50 +148,75 @@ class MainActivity : ComponentActivity() {
                                     folderPickerLauncher.launch(null)
                                 },
                                 onOpenFolderClick = {
-                                    loadAudioFiles()
-                                    currentScreen = Screen.FILE_BROWSER
+                                    loadConversations()
+                                    currentScreen = Screen.CONVERSATIONS
                                 }
                             )
                         }
                     }
 
-                    Screen.FILE_BROWSER -> {
+                    Screen.CONVERSATIONS -> {
                         BackHandler {
                             currentScreen = Screen.HOME
                         }
 
-                        FileBrowserScreen(
+                        ConversationsScreen(
                             folderName = displayFolderName ?: "Recordings",
-                            uiState = fileBrowserState,
+                            uiState = conversationsState,
                             onBackClick = {
                                 currentScreen = Screen.HOME
+                            },
+                            onRefreshClick = {
+                                loadConversations()
+                            },
+                            onConversationClick = { conversation ->
+                                selectedConversation = conversation
+                                currentScreen = Screen.CONVERSATION_DETAIL
                             },
                             onResetFolderClick = {
                                 currentScreen = Screen.HOME
                                 folderPickerLauncher.launch(null)
-                            },
-                            onRecordingClick = { audioFile ->
-                                selectedAudioFile = audioFile
-                                currentScreen = Screen.RECORDING_DETAIL
                             }
                         )
+                    }
+
+                    Screen.CONVERSATION_DETAIL -> {
+                        val conversation = selectedConversation
+                        if (conversation != null) {
+                            BackHandler {
+                                currentScreen = Screen.CONVERSATIONS
+                            }
+
+                            ConversationDetailScreen(
+                                conversation = conversation,
+                                onBackClick = {
+                                    currentScreen = Screen.CONVERSATIONS
+                                },
+                                onRecordingClick = { recording ->
+                                    selectedAudioFile = recording
+                                    currentScreen = Screen.RECORDING_DETAIL
+                                }
+                            )
+                        } else {
+                            currentScreen = Screen.CONVERSATIONS
+                        }
                     }
 
                     Screen.RECORDING_DETAIL -> {
                         val audio = selectedAudioFile
                         if (audio != null) {
                             BackHandler {
-                                currentScreen = Screen.FILE_BROWSER
+                                currentScreen = Screen.CONVERSATION_DETAIL
                             }
 
                             RecordingDetailScreen(
                                 audioFile = audio,
                                 onBackClick = {
-                                    currentScreen = Screen.FILE_BROWSER
+                                    currentScreen = Screen.CONVERSATION_DETAIL
                                 }
                             )
                         } else {
-                            currentScreen = Screen.FILE_BROWSER
+                            currentScreen = Screen.CONVERSATION_DETAIL
                         }
                     }
                 }

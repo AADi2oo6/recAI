@@ -7,7 +7,7 @@ import android.net.Uri
  */
 data class AudioFile(
     val name: String,
-    val uri: Uri,
+    val uri: Uri? = null,
     val mimeType: String?,
     val size: Long,
     val lastModified: Long,

@@ -8,7 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Locale
 
-class FileRepository(private val context: Context) {
+class FileRepository(private val context: Context? = null) {
 
     companion object {
         private val SUPPORTED_AUDIO_EXTENSIONS = setOf(
@@ -26,9 +26,10 @@ class FileRepository(private val context: Context) {
      * and sorts results newest first (by last modified timestamp).
      */
     suspend fun getAudioFiles(treeUri: Uri): Result<List<AudioFile>> = withContext(Dispatchers.IO) {
+        val nonNullContext = context ?: return@withContext Result.failure(IllegalStateException("Context is required to query documents"))
         try {
             // Check that we still hold persistable read permission
-            val hasPersistedPermission = context.contentResolver.persistedUriPermissions.any { permission ->
+            val hasPersistedPermission = nonNullContext.contentResolver.persistedUriPermissions.any { permission ->
                 permission.uri == treeUri && permission.isReadPermission
             }
             if (!hasPersistedPermission) {
@@ -49,7 +50,7 @@ class FileRepository(private val context: Context) {
 
             val audioFiles = mutableListOf<AudioFile>()
 
-            context.contentResolver.query(
+            nonNullContext.contentResolver.query(
                 childrenUri,
                 projection,
                 null,
@@ -98,6 +99,70 @@ class FileRepository(private val context: Context) {
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    /**
+     * Reads audio recordings from the tree URI and groups them into Conversations
+     * by phone number, sorted by latest recording date (newest first).
+     */
+    suspend fun getConversations(treeUri: Uri): Result<List<com.recai.app.data.model.Conversation>> {
+        val audioFilesResult = getAudioFiles(treeUri)
+        return audioFilesResult.map { files ->
+            groupIntoConversations(files)
+        }
+    }
+
+    /**
+     * Groups a list of AudioFiles into Conversations:
+     * - Recordings with the same phone number are merged into one Conversation.
+     * - The best available non-empty caller name is chosen for the Conversation.
+     * - Recordings with no phone number get their own unique conversation (or unique key)
+     *   so unrelated unknown recordings are not incorrectly merged.
+     * - Conversations are sorted newest first based on their latest recording.
+     */
+    fun groupIntoConversations(files: List<AudioFile>): List<com.recai.app.data.model.Conversation> {
+        if (files.isEmpty()) return emptyList()
+
+        // Map key -> MutableList of AudioFiles
+        // For files with a phone number, the key is "phone:<phoneNumber>".
+        // For files without a phone number, the key is unique per file ("file:<uri>").
+        val groups = linkedMapOf<String, MutableList<AudioFile>>()
+
+        for (file in files) {
+            val phone = file.metadata?.phoneNumber?.trim()?.ifBlank { null }
+            val groupKey = if (phone != null) {
+                "phone:$phone"
+            } else {
+                // Unique group per file when phone is missing
+                "file:${file.name}_${file.lastModified}_${System.identityHashCode(file)}"
+            }
+            groups.getOrPut(groupKey) { mutableListOf() }.add(file)
+        }
+
+        val conversations = groups.map { (key, groupRecordings) ->
+            // Sort recordings within the conversation newest first
+            val sortedRecordings = groupRecordings.sortedByDescending { it.lastModified }
+
+            val phoneNumber = if (key.startsWith("phone:")) {
+                key.removePrefix("phone:")
+            } else {
+                null
+            }
+
+            // Find best available caller name from recordings in this group
+            val callerName = sortedRecordings.mapNotNull { it.metadata?.callerName?.trim() }
+                .firstOrNull { it.isNotBlank() }
+
+            com.recai.app.data.model.Conversation(
+                id = key,
+                phoneNumber = phoneNumber,
+                callerName = callerName,
+                recordings = sortedRecordings
+            )
+        }
+
+        // Sort conversations newest first
+        return conversations.sortedByDescending { it.latestTimestampMillis }
     }
 
     private fun isSupportedAudioFile(fileName: String, mimeType: String?): Boolean {
