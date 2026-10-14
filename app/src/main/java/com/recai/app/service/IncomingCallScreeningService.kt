@@ -86,22 +86,22 @@ class IncomingCallScreeningService : CallScreeningService() {
                     Log.d(TAG, "conversation not found for incoming number")
                 }
 
-                CallerNotificationHelper.showCallerNotification(
+                val notifData = CallerNotificationHelper.showCallerNotification(
                     context = applicationContext,
                     rawPhoneNumber = rawHandle,
                     conversation = conversation
                 )
-                Log.d(TAG, "notification posted successfully")
+                Log.d(TAG, "notification posted successfully (variant=${notifData.variant})")
             } catch (e: Exception) {
                 Log.e(TAG, "exception during call screening lookup: ${e.message}", e)
                 // Safeguard: Never crash in background screening service
                 try {
-                    CallerNotificationHelper.showCallerNotification(
+                    val fallbackData = CallerNotificationHelper.showCallerNotification(
                         context = applicationContext,
                         rawPhoneNumber = rawHandle,
                         conversation = null
                     )
-                    Log.d(TAG, "fallback notification posted")
+                    Log.d(TAG, "fallback notification posted (variant=${fallbackData.variant})")
                 } catch (fallbackEx: Exception) {
                     Log.e(TAG, "failed to post fallback notification: ${fallbackEx.message}", fallbackEx)
                 }

@@ -50,10 +50,18 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_CONVERSATION_ID = "extra_conversation_id"
         const val EXTRA_PHONE_NUMBER = "extra_phone_number"
+        const val EXTRA_NAVIGATE_TO = "extra_navigate_to"
+        const val NAV_TARGET_CONVERSATION_DETAIL = "CONVERSATION_DETAIL"
+        const val NAV_TARGET_CONVERSATIONS = "CONVERSATIONS"
     }
 
-    private var targetConversationId: String? = null
-    private var targetPhoneNumber: String? = null
+    data class NotificationNavTarget(
+        val conversationId: String?,
+        val phoneNumber: String?,
+        val navigateTo: String?
+    )
+
+    private val navTargetState = mutableStateOf<NotificationNavTarget?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -161,22 +169,24 @@ class MainActivity : ComponentActivity() {
                             onSuccess = { convList ->
                                 conversationsState = ConversationsUiState.Success(convList)
 
-                                // Handle intent deep-linking to conversation
-                                val deepConvId = targetConversationId
-                                val deepPhone = targetPhoneNumber
-                                if (deepConvId != null || deepPhone != null) {
-                                    val matched = convList.firstOrNull { conv ->
-                                        conv.id == deepConvId ||
-                                                (deepPhone != null && PhoneNumberMatcher.matches(conv.phoneNumber, deepPhone))
-                                    }
-                                    if (matched != null) {
-                                        selectedConversation = matched
-                                        currentScreen = Screen.CONVERSATION_DETAIL
-                                    } else {
+                                // Handle intent deep-linking to conversation or conversations list
+                                val deepTarget = navTargetState.value
+                                if (deepTarget != null) {
+                                    if (deepTarget.navigateTo == NAV_TARGET_CONVERSATIONS) {
                                         currentScreen = Screen.CONVERSATIONS
+                                    } else {
+                                        val matched = convList.firstOrNull { conv ->
+                                            (deepTarget.conversationId != null && conv.id == deepTarget.conversationId) ||
+                                                    (deepTarget.phoneNumber != null && PhoneNumberMatcher.matches(conv.phoneNumber, deepTarget.phoneNumber))
+                                        }
+                                        if (matched != null) {
+                                            selectedConversation = matched
+                                            currentScreen = Screen.CONVERSATION_DETAIL
+                                        } else {
+                                            currentScreen = Screen.CONVERSATIONS
+                                        }
                                     }
-                                    targetConversationId = null
-                                    targetPhoneNumber = null
+                                    navTargetState.value = null
                                 } else {
                                     val currentConvId = selectedConversation?.id
                                     if (currentConvId != null) {
@@ -195,8 +205,9 @@ class MainActivity : ComponentActivity() {
                 }
 
                 // Handle deep link when app is opened from notification
-                LaunchedEffect(storedUriString, targetConversationId, targetPhoneNumber) {
-                    if (storedUriString != null && (targetConversationId != null || targetPhoneNumber != null)) {
+                LaunchedEffect(storedUriString, navTargetState.value) {
+                    val deepTarget = navTargetState.value
+                    if (storedUriString != null && deepTarget != null) {
                         loadConversations()
                     }
                 }
@@ -336,8 +347,16 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun extractIntentExtras(intent: Intent?) {
-        targetConversationId = intent?.getStringExtra(EXTRA_CONVERSATION_ID)
-        targetPhoneNumber = intent?.getStringExtra(EXTRA_PHONE_NUMBER)
+        val convId = intent?.getStringExtra(EXTRA_CONVERSATION_ID)
+        val phone = intent?.getStringExtra(EXTRA_PHONE_NUMBER)
+        val navTo = intent?.getStringExtra(EXTRA_NAVIGATE_TO)
+        if (convId != null || phone != null || navTo != null) {
+            navTargetState.value = NotificationNavTarget(
+                conversationId = convId,
+                phoneNumber = phone,
+                navigateTo = navTo
+            )
+        }
     }
 
     private fun checkCallScreeningRoleHeld(): Boolean {
