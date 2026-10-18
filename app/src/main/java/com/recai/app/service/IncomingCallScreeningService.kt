@@ -61,6 +61,14 @@ class IncomingCallScreeningService : CallScreeningService() {
 
         serviceScope.launch {
             try {
+                // Check if caller tracking is enabled for this number
+                val trackingRepo = com.recai.app.data.storage.TrackingRepository(applicationContext)
+                val isTracked = trackingRepo.isTrackingEnabled(rawHandle)
+                if (!isTracked) {
+                    Log.d(TAG, "Tracking is disabled for ${maskPhoneNumber(rawHandle)}; skipping caller notification")
+                    return@launch
+                }
+
                 Log.d(TAG, "starting recording lookup...")
                 val folderPrefs = FolderPreferences(applicationContext)
                 val treeUriString = folderPrefs.folderUriFlow.firstOrNull()

@@ -44,7 +44,8 @@ fun HomeScreen(
     onOpenFolderClick: () -> Unit = {},
     onRequestCallScreeningRole: () -> Unit = {},
     onRequestContactsPermission: () -> Unit = {},
-    onRequestNotificationPermission: () -> Unit = {}
+    onRequestNotificationPermission: () -> Unit = {},
+    onManageTrackingClick: () -> Unit = {}
 ) {
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -131,6 +132,8 @@ fun HomeScreen(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
+                    Spacer(modifier = Modifier.height(16.dp))
+
                     // Open Folder Button
                     FilledTonalButton(
                         onClick = onOpenFolderClick,
@@ -143,6 +146,21 @@ fun HomeScreen(
                             style = MaterialTheme.typography.labelLarge
                         )
                     }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Manage Tracking Button
+                    OutlinedButton(
+                        onClick = onManageTrackingClick,
+                        modifier = Modifier
+                            .fillMaxWidth(0.8f)
+                            .height(48.dp)
+                    ) {
+                        Text(
+                            text = "Manage Tracking",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
                 }
             } else {
                 Text(
@@ -151,6 +169,21 @@ fun HomeScreen(
                     color = MaterialTheme.colorScheme.outline,
                     textAlign = TextAlign.Center
                 )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Manage Tracking Button even when no folder is selected
+                OutlinedButton(
+                    onClick = onManageTrackingClick,
+                    modifier = Modifier
+                        .fillMaxWidth(0.8f)
+                        .height(48.dp)
+                ) {
+                    Text(
+                        text = "Manage Tracking",
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(32.dp))

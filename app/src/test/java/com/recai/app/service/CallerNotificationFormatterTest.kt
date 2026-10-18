@@ -206,10 +206,10 @@ class CallerNotificationFormatterTest {
         assertEquals("+91 93224 77239", CallerNotificationFormatter.formatPhoneNumberForDisplay("00919322477239"))
         // India 91 prefix without plus
         assertEquals("+91 93224 77239", CallerNotificationFormatter.formatPhoneNumberForDisplay("919322477239"))
-        // Local 10 digits
-        assertEquals("93224 77239", CallerNotificationFormatter.formatPhoneNumberForDisplay("9322477239"))
+        // Local 10 digits (formatted as +91 XXXXX XXXXX in Step 11)
+        assertEquals("+91 93224 77239", CallerNotificationFormatter.formatPhoneNumberForDisplay("9322477239"))
         // National 11 digits with 0 trunk
-        assertEquals("093224 77239", CallerNotificationFormatter.formatPhoneNumberForDisplay("09322477239"))
+        assertEquals("+91 93224 77239", CallerNotificationFormatter.formatPhoneNumberForDisplay("09322477239"))
         // US +1
         assertEquals("+1 415 555 2671", CallerNotificationFormatter.formatPhoneNumberForDisplay("+14155552671"))
         // Already formatted / masked

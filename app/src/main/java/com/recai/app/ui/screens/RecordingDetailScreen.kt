@@ -1,6 +1,7 @@
 package com.recai.app.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,17 +13,22 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
@@ -52,8 +58,12 @@ import androidx.compose.ui.unit.dp
 import com.recai.app.R
 import com.recai.app.data.model.AudioFile
 import com.recai.app.data.model.RecordingMetadata
+import com.recai.app.data.parser.PhoneNumberFormatter
+import com.recai.app.data.storage.TrackingRepository
+import com.recai.app.ui.player.AudioPlaybackHelper
 import com.recai.app.ui.player.AudioPlayerController
 import com.recai.app.ui.theme.RecAITheme
+import com.recai.app.ui.util.PhoneActionHelper
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.time.LocalDateTime
@@ -66,7 +76,8 @@ import java.util.Locale
 fun RecordingDetailScreen(
     audioFile: AudioFile,
     modifier: Modifier = Modifier,
-    onBackClick: () -> Unit = {}
+    onBackClick: () -> Unit = {},
+    onManageTrackingClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -89,13 +100,21 @@ fun RecordingDetailScreen(
 
     val playerState by playerController.playerState.collectAsState()
 
+    // Tracking state
+    val trackingRepo = remember { TrackingRepository(context) }
+    val isTracked by trackingRepo.isTrackingEnabledFlow(audioFile.metadata?.phoneNumber).collectAsState(initial = true)
+
     // Manage seeking state while user is dragging slider
     var isUserDraggingSlider by remember { mutableStateOf(false) }
     var draggingProgress by remember { mutableFloatStateOf(0f) }
 
+    // Playback speed dropdown state
+    var isSpeedMenuExpanded by remember { mutableStateOf(false) }
+
     val metadata = audioFile.metadata
     val callerName = metadata?.callerName ?: "Unknown caller"
     val phoneNumber = metadata?.phoneNumber
+    val formattedPhone = PhoneNumberFormatter.format(phoneNumber)
     val dateTimeText = formatRecordingDateTime(metadata?.recordingDateTime, audioFile.lastModified)
     val extension = audioFile.name.substringAfterLast('.', "").uppercase(Locale.ROOT)
     val fileSizeText = formatFileSize(audioFile.size)
@@ -103,6 +122,8 @@ fun RecordingDetailScreen(
         if (extension.isNotBlank()) add(extension)
         if (fileSizeText.isNotBlank()) add(fileSizeText)
     }.joinToString(" • ")
+
+    val originalFilename = metadata?.originalFileName ?: audioFile.name
 
     // Surface playback errors via Snackbar
     LaunchedEffect(playerState.errorMessage) {
@@ -145,13 +166,13 @@ fun RecordingDetailScreen(
                 .padding(horizontal = 24.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
-            // Metadata Card
+            // 1. Header Metadata Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
                 )
             ) {
                 Column(
@@ -173,7 +194,7 @@ fun RecordingDetailScreen(
                     if (!phoneNumber.isNullOrBlank()) {
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = phoneNumber,
+                            text = formattedPhone,
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center
@@ -181,7 +202,7 @@ fun RecordingDetailScreen(
                     }
 
                     if (dateTimeText.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = dateTimeText,
                             style = MaterialTheme.typography.bodyMedium,
@@ -202,52 +223,105 @@ fun RecordingDetailScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(36.dp))
+            Spacer(modifier = Modifier.height(28.dp))
 
-            // Playback Error alert (if any)
+            // 2. Playback Error Alert (if any)
             if (playerState.errorMessage != null) {
                 Text(
                     text = playerState.errorMessage ?: "",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error,
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(bottom = 16.dp)
+                    modifier = Modifier.padding(bottom = 12.dp)
                 )
             }
 
-            // Play / Pause Button
-            FilledIconButton(
-                onClick = { playerController.togglePlayPause() },
-                modifier = Modifier.size(64.dp),
-                shape = CircleShape,
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary
-                )
+            // 3. Audio Playback Controls
+            val duration = playerState.durationMs
+            val currentPos = playerState.currentPositionMs
+
+            // Play / Pause / Skip Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                if (playerState.isBuffering) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(28.dp),
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        strokeWidth = 3.dp
+                // -10 Seconds Button
+                IconButton(
+                    onClick = { playerController.rewind10Seconds() },
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Text(
+                        text = "↶ 10s",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                } else {
-                    Icon(
-                        painter = painterResource(
-                            id = if (playerState.isPlaying) R.drawable.ic_pause else R.drawable.ic_play
-                        ),
-                        contentDescription = if (playerState.isPlaying) "Pause" else "Play",
-                        modifier = Modifier.size(32.dp)
+                }
+
+                Spacer(modifier = Modifier.width(20.dp))
+
+                // Play / Pause Button
+                FilledIconButton(
+                    onClick = { playerController.togglePlayPause() },
+                    modifier = Modifier.size(68.dp),
+                    shape = CircleShape,
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                ) {
+                    if (playerState.isBuffering) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(28.dp),
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            strokeWidth = 3.dp
+                        )
+                    } else {
+                        Icon(
+                            painter = painterResource(
+                                id = if (playerState.isPlaying) R.drawable.ic_pause else R.drawable.ic_play
+                            ),
+                            contentDescription = if (playerState.isPlaying) "Pause" else "Play",
+                            modifier = Modifier.size(34.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(20.dp))
+
+                // +10 Seconds Button
+                IconButton(
+                    onClick = { playerController.forward10Seconds() },
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Text(
+                        text = "10s ↷",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Timestamps: 0:07 / 0:19
+            val displayCurrentMs = if (isUserDraggingSlider && duration > 0L) {
+                (draggingProgress * duration).toLong()
+            } else {
+                currentPos
+            }
+            Text(
+                text = "${formatTime(displayCurrentMs)} / ${formatTime(duration)}",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
 
             // Progress Slider
-            val duration = playerState.durationMs
-            val currentPos = playerState.currentPositionMs
-
             val sliderValue = when {
                 duration <= 0L -> 0f
                 isUserDraggingSlider -> draggingProgress
@@ -270,31 +344,183 @@ fun RecordingDetailScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            // Timestamps: Current Position vs Total Duration
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                val displayCurrentMs = if (isUserDraggingSlider && duration > 0L) {
-                    (draggingProgress * duration).toLong()
-                } else {
-                    currentPos
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // Playback Speed Selector
+            Box {
+                OutlinedButton(
+                    onClick = { isSpeedMenuExpanded = true },
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Text(
+                        text = AudioPlaybackHelper.formatSpeedLabel(playerState.playbackSpeed),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
-                Text(
-                    text = formatTime(displayCurrentMs),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = formatTime(duration),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+
+                DropdownMenu(
+                    expanded = isSpeedMenuExpanded,
+                    onDismissRequest = { isSpeedMenuExpanded = false }
+                ) {
+                    AudioPlaybackHelper.AVAILABLE_SPEEDS.forEach { speed ->
+                        val isSelected = playerState.playbackSpeed == speed
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = if (isSelected) "✓  ${AudioPlaybackHelper.formatSpeedLabel(speed)}" else "    ${AudioPlaybackHelper.formatSpeedLabel(speed)}",
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                )
+                            },
+                            onClick = {
+                                playerController.setPlaybackSpeed(speed)
+                                isSpeedMenuExpanded = false
+                            }
+                        )
+                    }
+                }
             }
 
-            Spacer(modifier = Modifier.height(40.dp))
+            Spacer(modifier = Modifier.height(28.dp))
 
-            // Analyse Recording Button
+            // 4. Actions Section (Call / Add to contacts)
+            if (PhoneActionHelper.isActionablePhoneNumber(phoneNumber)) {
+                SectionHeader(title = "Actions")
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                PhoneActionHelper.openDialer(context, phoneNumber)
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Call")
+                        }
+
+                        if (!PhoneActionHelper.isKnownCaller(callerName, phoneNumber)) {
+                            OutlinedButton(
+                                onClick = {
+                                    PhoneActionHelper.openAddContact(context, phoneNumber, callerName)
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Add to contacts")
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+            }
+
+            // 5. Tracking Section
+            if (PhoneActionHelper.isActionablePhoneNumber(phoneNumber)) {
+                SectionHeader(title = "Tracking")
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (isTracked) "Tracking enabled" else "Tracking disabled",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = if (isTracked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        FilledTonalButton(
+                            onClick = onManageTrackingClick
+                        ) {
+                            Text("Manage tracking")
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+            }
+
+            // 6. Recording Information Section
+            SectionHeader(title = "Recording information")
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                )
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
+                    InfoItemRow(label = "Caller", value = callerName)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    InfoItemRow(label = "Phone", value = formattedPhone)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    InfoItemRow(
+                        label = "Date",
+                        value = formatDateOnly(metadata?.recordingDateTime, audioFile.lastModified)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    InfoItemRow(
+                        label = "Time",
+                        value = formatTimeOnly(metadata?.recordingDateTime, audioFile.lastModified)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    InfoItemRow(
+                        label = "Format",
+                        value = extension.ifBlank { "Unknown format" }
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    InfoItemRow(
+                        label = "Size",
+                        value = fileSizeText.ifBlank { "Size unavailable" }
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // 7. Original File Section
+            SectionHeader(title = "Original file")
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                )
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
+                    Text(
+                        text = originalFilename,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        softWrap = true
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            // 8. Analyse Recording Button
             Button(
                 onClick = {
                     coroutineScope.launch {
@@ -302,7 +528,7 @@ fun RecordingDetailScreen(
                     }
                 },
                 modifier = Modifier
-                    .fillMaxWidth(0.8f)
+                    .fillMaxWidth(0.85f)
                     .height(50.dp)
             ) {
                 Text(
@@ -310,7 +536,45 @@ fun RecordingDetailScreen(
                     style = MaterialTheme.typography.labelLarge
                 )
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
         }
+    }
+}
+
+@Composable
+private fun SectionHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp)
+    )
+}
+
+@Composable
+private fun InfoItemRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -324,14 +588,38 @@ private fun formatTime(timeMs: Long): String {
 
 private fun formatRecordingDateTime(dateTime: LocalDateTime?, lastModifiedFallback: Long): String {
     if (dateTime != null) {
-        val formatter = DateTimeFormatter.ofPattern("MMM d, yyyy • h:mm a", Locale.getDefault())
+        val formatter = DateTimeFormatter.ofPattern("MMM d, yyyy • h:mm a", Locale.US)
         return dateTime.format(formatter)
     }
     if (lastModifiedFallback > 0) {
-        val formatter = SimpleDateFormat("MMM d, yyyy • h:mm a", Locale.getDefault())
+        val formatter = SimpleDateFormat("MMM d, yyyy • h:mm a", Locale.US)
         return formatter.format(Date(lastModifiedFallback))
     }
     return ""
+}
+
+private fun formatDateOnly(dateTime: LocalDateTime?, lastModifiedFallback: Long): String {
+    if (dateTime != null) {
+        val formatter = DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.US)
+        return dateTime.format(formatter)
+    }
+    if (lastModifiedFallback > 0) {
+        val formatter = SimpleDateFormat("MMM d, yyyy", Locale.US)
+        return formatter.format(Date(lastModifiedFallback))
+    }
+    return "Date unavailable"
+}
+
+private fun formatTimeOnly(dateTime: LocalDateTime?, lastModifiedFallback: Long): String {
+    if (dateTime != null) {
+        val formatter = DateTimeFormatter.ofPattern("h:mm a", Locale.US)
+        return dateTime.format(formatter)
+    }
+    if (lastModifiedFallback > 0) {
+        val formatter = SimpleDateFormat("h:mm a", Locale.US)
+        return formatter.format(Date(lastModifiedFallback))
+    }
+    return "Time unavailable"
 }
 
 private fun formatFileSize(bytes: Long): String {
@@ -354,7 +642,7 @@ fun RecordingDetailPreview() {
         RecordingDetailScreen(
             audioFile = AudioFile(
                 name = "Darshan Roommate(00919699177117)_20261013202700.mp3",
-                uri = android.net.Uri.EMPTY,
+                uri = null,
                 mimeType = "audio/mpeg",
                 size = 132096L,
                 lastModified = 1728800000000L,

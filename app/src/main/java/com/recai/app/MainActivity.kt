@@ -35,6 +35,7 @@ import com.recai.app.ui.screens.ConversationsScreen
 import com.recai.app.ui.screens.ConversationsUiState
 import com.recai.app.ui.screens.HomeScreen
 import com.recai.app.ui.screens.RecordingDetailScreen
+import com.recai.app.ui.screens.TrackingScreen
 import com.recai.app.ui.theme.RecAITheme
 import kotlinx.coroutines.launch
 
@@ -42,7 +43,8 @@ private enum class Screen {
     HOME,
     CONVERSATIONS,
     CONVERSATION_DETAIL,
-    RECORDING_DETAIL
+    RECORDING_DETAIL,
+    TRACKING
 }
 
 class MainActivity : ComponentActivity() {
@@ -260,6 +262,12 @@ class MainActivity : ComponentActivity() {
                                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                                         notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                                     }
+                                },
+                                onManageTrackingClick = {
+                                    if (conversationsState !is ConversationsUiState.Success && storedUriString != null) {
+                                        loadConversations()
+                                    }
+                                    currentScreen = Screen.TRACKING
                                 }
                             )
                         }
@@ -323,11 +331,32 @@ class MainActivity : ComponentActivity() {
                                 audioFile = audio,
                                 onBackClick = {
                                     currentScreen = Screen.CONVERSATION_DETAIL
+                                },
+                                onManageTrackingClick = {
+                                    currentScreen = Screen.TRACKING
                                 }
                             )
                         } else {
                             currentScreen = Screen.CONVERSATION_DETAIL
                         }
+                    }
+
+                    Screen.TRACKING -> {
+                        BackHandler {
+                            currentScreen = Screen.HOME
+                        }
+
+                        val currentList = when (val state = conversationsState) {
+                            is ConversationsUiState.Success -> state.conversations
+                            else -> emptyList()
+                        }
+
+                        TrackingScreen(
+                            conversations = currentList,
+                            onBackClick = {
+                                currentScreen = Screen.HOME
+                            }
+                        )
                     }
                 }
             }

@@ -50,46 +50,7 @@ object CallerNotificationFormatter {
      * Does NOT alter the underlying stored phone number or matching logic.
      */
     fun formatPhoneNumberForDisplay(rawNumber: String?): String {
-        if (rawNumber.isNullOrBlank()) {
-            return PRIVATE_NUMBER_DISPLAY
-        }
-
-        val trimmed = rawNumber.trim()
-
-        // If already formatted with spaces or contains masked characters (e.g. 'X'), preserve as-is
-        if (trimmed.contains(' ') || trimmed.contains('X', ignoreCase = true)) {
-            return trimmed
-        }
-
-        val digitsOnly = trimmed.filter { it.isDigit() }
-
-        // International India: +91 or 0091 followed by 10 digits
-        if ((trimmed.startsWith("+91") && digitsOnly.length == 12) ||
-            (trimmed.startsWith("0091") && digitsOnly.length == 14) ||
-            (trimmed.startsWith("91") && digitsOnly.length == 12)
-        ) {
-            val local10 = digitsOnly.takeLast(10)
-            return "+91 ${local10.substring(0, 5)} ${local10.substring(5)}"
-        }
-
-        // Local 10 digits (e.g. 9322477239)
-        if (digitsOnly.length == 10 && !trimmed.startsWith("+")) {
-            return "${digitsOnly.substring(0, 5)} ${digitsOnly.substring(5)}"
-        }
-
-        // National 11 digits with leading 0 trunk prefix (e.g. 09322477239)
-        if (digitsOnly.length == 11 && trimmed.startsWith("0")) {
-            return "0${digitsOnly.substring(1, 6)} ${digitsOnly.substring(6)}"
-        }
-
-        // US / North American numbers: +1 followed by 10 digits
-        if (trimmed.startsWith("+1") && digitsOnly.length == 11) {
-            val local10 = digitsOnly.takeLast(10)
-            return "+1 ${local10.substring(0, 3)} ${local10.substring(3, 6)} ${local10.substring(6)}"
-        }
-
-        // Fallback: Return original trimmed number
-        return trimmed
+        return com.recai.app.data.parser.PhoneNumberFormatter.format(rawNumber, fallback = PRIVATE_NUMBER_DISPLAY)
     }
 
     /**

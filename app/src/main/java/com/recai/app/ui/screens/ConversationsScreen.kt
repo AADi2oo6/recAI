@@ -427,7 +427,7 @@ fun ConversationCardItem(
                 if (!phoneNumber.isNullOrBlank()) {
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = phoneNumber,
+                        text = com.recai.app.data.parser.PhoneNumberFormatter.format(phoneNumber),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,

@@ -30,9 +30,11 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -40,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -54,7 +57,11 @@ import com.recai.app.data.model.Conversation
 import com.recai.app.data.model.RecordingMetadata
 import com.recai.app.data.model.SortOrder
 import com.recai.app.data.storage.ConversationFilterHelper
+import com.recai.app.data.storage.TrackingRepository
+import com.recai.app.data.parser.PhoneNumberFormatter
 import com.recai.app.ui.theme.RecAITheme
+import com.recai.app.ui.util.PhoneActionHelper
+import kotlinx.coroutines.launch
 import java.time.LocalDateTime
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -94,6 +101,41 @@ fun ConversationDetailScreen(
         if (isSearchActive) {
             focusRequester.requestFocus()
         }
+    }
+
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val trackingRepo = remember { com.recai.app.data.storage.TrackingRepository(context) }
+    val isTracked by trackingRepo.isTrackingEnabledFlow(phoneNumber).collectAsState(initial = true)
+    var showRemoveTrackingDialog by remember { mutableStateOf(false) }
+
+    if (showRemoveTrackingDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showRemoveTrackingDialog = false },
+            title = { Text("Remove from tracking?") },
+            text = {
+                Text("recAI will stop showing caller notifications for this number.\n\nExisting recordings will not be deleted.")
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        showRemoveTrackingDialog = false
+                        coroutineScope.launch {
+                            if (!phoneNumber.isNullOrBlank()) {
+                                trackingRepo.setTrackingEnabled(phoneNumber, false, callerName)
+                            }
+                        }
+                    }
+                ) {
+                    Text("Remove", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { showRemoveTrackingDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     Scaffold(
@@ -233,11 +275,11 @@ fun ConversationDetailScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // Header Card with phone number & full recording count
+            // Header Card with formatted phone number, actions & tracking
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
                 )
@@ -249,7 +291,7 @@ fun ConversationDetailScreen(
                 ) {
                     if (!phoneNumber.isNullOrBlank()) {
                         Text(
-                            text = phoneNumber,
+                            text = com.recai.app.data.parser.PhoneNumberFormatter.format(phoneNumber),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface
@@ -262,6 +304,74 @@ fun ConversationDetailScreen(
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Medium
                     )
+
+                    // Caller Actions (Call / Add to contacts)
+                    if (com.recai.app.ui.util.PhoneActionHelper.isActionablePhoneNumber(phoneNumber)) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        androidx.compose.foundation.layout.Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            androidx.compose.material3.OutlinedButton(
+                                onClick = {
+                                    com.recai.app.ui.util.PhoneActionHelper.openDialer(context, phoneNumber)
+                                }
+                            ) {
+                                Text("Call")
+                            }
+
+                            if (!com.recai.app.ui.util.PhoneActionHelper.isKnownCaller(callerName, phoneNumber)) {
+                                androidx.compose.material3.OutlinedButton(
+                                    onClick = {
+                                        com.recai.app.ui.util.PhoneActionHelper.openAddContact(context, phoneNumber, callerName)
+                                    }
+                                ) {
+                                    Text("Add to contacts")
+                                }
+                            }
+                        }
+                    }
+
+                    // Tracking state & control
+                    if (com.recai.app.ui.util.PhoneActionHelper.isActionablePhoneNumber(phoneNumber)) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        androidx.compose.foundation.layout.Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = "Tracking",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.outline
+                                )
+                                Text(
+                                    text = if (isTracked) "● Tracking enabled" else "○ Tracking disabled",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium,
+                                    color = if (isTracked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            if (isTracked) {
+                                androidx.compose.material3.TextButton(
+                                    onClick = { showRemoveTrackingDialog = true }
+                                ) {
+                                    Text("Remove from tracking")
+                                }
+                            } else {
+                                androidx.compose.material3.FilledTonalButton(
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            trackingRepo.setTrackingEnabled(phoneNumber ?: "", true)
+                                        }
+                                    }
+                                ) {
+                                    Text("Add to tracking")
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
