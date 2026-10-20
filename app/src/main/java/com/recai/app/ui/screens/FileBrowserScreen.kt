@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import com.recai.app.R
 import com.recai.app.data.model.AudioFile
 import com.recai.app.data.model.RecordingMetadata
+import com.recai.app.data.parser.PhoneNumberFormatter
 import com.recai.app.ui.theme.RecAITheme
 import java.text.SimpleDateFormat
 import java.time.LocalDateTime
@@ -230,7 +231,7 @@ fun AudioFileItem(
                 if (!phoneNumber.isNullOrBlank()) {
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = phoneNumber,
+                        text = PhoneNumberFormatter.format(phoneNumber),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,

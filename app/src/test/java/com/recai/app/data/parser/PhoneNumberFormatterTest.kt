@@ -54,8 +54,11 @@ class PhoneNumberFormatterTest {
         assertEquals("Not available", PhoneNumberFormatter.format(null))
         assertEquals("Not available", PhoneNumberFormatter.format(""))
         assertEquals("Not available", PhoneNumberFormatter.format("   "))
+        assertEquals("Not available", PhoneNumberFormatter.format("null"))
+        assertEquals("Not available", PhoneNumberFormatter.format("NULL"))
         assertEquals("", PhoneNumberFormatter.formatOrEmpty(null))
         assertEquals("", PhoneNumberFormatter.formatOrEmpty(""))
+        assertEquals("", PhoneNumberFormatter.formatOrEmpty("null"))
     }
 
     @Test

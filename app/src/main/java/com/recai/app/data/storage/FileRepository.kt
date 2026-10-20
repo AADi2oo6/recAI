@@ -178,6 +178,29 @@ class FileRepository(private val context: Context? = null) {
         return conversations.sortedByDescending { it.latestTimestampMillis }
     }
 
+    /**
+     * Deletes an audio file from the SAF folder using DocumentsContract or ContentResolver.
+     */
+    suspend fun deleteAudioFile(fileUri: Uri): Result<Boolean> = withContext(Dispatchers.IO) {
+        val nonNullContext = context ?: return@withContext Result.failure(IllegalStateException("Context is required"))
+        try {
+            val deleted = DocumentsContract.deleteDocument(nonNullContext.contentResolver, fileUri)
+            if (deleted) {
+                Result.success(true)
+            } else {
+                val count = nonNullContext.contentResolver.delete(fileUri, null, null)
+                Result.success(count > 0)
+            }
+        } catch (e: Exception) {
+            try {
+                val count = nonNullContext.contentResolver.delete(fileUri, null, null)
+                Result.success(count > 0)
+            } catch (ex: Exception) {
+                Result.failure(ex)
+            }
+        }
+    }
+
     private fun isSupportedAudioFile(fileName: String, mimeType: String?): Boolean {
         val extension = fileName.substringAfterLast('.', "").lowercase(Locale.ROOT)
         if (SUPPORTED_AUDIO_EXTENSIONS.contains(extension)) {

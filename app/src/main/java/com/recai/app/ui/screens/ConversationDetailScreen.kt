@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,18 +15,24 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -56,11 +63,12 @@ import com.recai.app.data.model.AudioFile
 import com.recai.app.data.model.Conversation
 import com.recai.app.data.model.RecordingMetadata
 import com.recai.app.data.model.SortOrder
+import com.recai.app.data.parser.PhoneNumberFormatter
 import com.recai.app.data.storage.ConversationFilterHelper
 import com.recai.app.data.storage.TrackingRepository
-import com.recai.app.data.parser.PhoneNumberFormatter
 import com.recai.app.ui.theme.RecAITheme
 import com.recai.app.ui.util.PhoneActionHelper
+import com.recai.app.ui.util.WhatsAppLaunchResult
 import kotlinx.coroutines.launch
 import java.time.LocalDateTime
 
@@ -70,7 +78,7 @@ fun ConversationDetailScreen(
     conversation: Conversation,
     modifier: Modifier = Modifier,
     onBackClick: () -> Unit = {},
-    onRecordingClick: (AudioFile) -> Unit = {}
+    onRecordingClick: (AudioFile, SortOrder) -> Unit = { _, _ -> }
 ) {
     var isSearchActive by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -79,6 +87,7 @@ fun ConversationDetailScreen(
 
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
+    val snackbarHostState = remember { SnackbarHostState() }
 
     val callerName = conversation.callerName ?: "Unknown caller"
     val phoneNumber = conversation.phoneNumber
@@ -105,19 +114,19 @@ fun ConversationDetailScreen(
 
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    val trackingRepo = remember { com.recai.app.data.storage.TrackingRepository(context) }
+    val trackingRepo = remember { TrackingRepository(context) }
     val isTracked by trackingRepo.isTrackingEnabledFlow(phoneNumber).collectAsState(initial = true)
     var showRemoveTrackingDialog by remember { mutableStateOf(false) }
 
     if (showRemoveTrackingDialog) {
-        androidx.compose.material3.AlertDialog(
+        AlertDialog(
             onDismissRequest = { showRemoveTrackingDialog = false },
             title = { Text("Remove from tracking?") },
             text = {
                 Text("recAI will stop showing caller notifications for this number.\n\nExisting recordings will not be deleted.")
             },
             confirmButton = {
-                androidx.compose.material3.TextButton(
+                TextButton(
                     onClick = {
                         showRemoveTrackingDialog = false
                         coroutineScope.launch {
@@ -131,7 +140,7 @@ fun ConversationDetailScreen(
                 }
             },
             dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { showRemoveTrackingDialog = false }) {
+                TextButton(onClick = { showRemoveTrackingDialog = false }) {
                     Text("Cancel")
                 }
             }
@@ -140,6 +149,7 @@ fun ConversationDetailScreen(
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             if (isSearchActive) {
                 TopAppBar(
@@ -291,7 +301,7 @@ fun ConversationDetailScreen(
                 ) {
                     if (!phoneNumber.isNullOrBlank()) {
                         Text(
-                            text = com.recai.app.data.parser.PhoneNumberFormatter.format(phoneNumber),
+                            text = PhoneNumberFormatter.format(phoneNumber),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface
@@ -305,37 +315,90 @@ fun ConversationDetailScreen(
                         fontWeight = FontWeight.Medium
                     )
 
-                    // Caller Actions (Call / Add to contacts)
-                    if (com.recai.app.ui.util.PhoneActionHelper.isActionablePhoneNumber(phoneNumber)) {
+                    // Conversation-level Actions (Call / Message / WhatsApp / Add to contacts)
+                    if (PhoneActionHelper.isActionablePhoneNumber(phoneNumber)) {
                         Spacer(modifier = Modifier.height(12.dp))
-                        androidx.compose.foundation.layout.Row(
+                        Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            androidx.compose.material3.OutlinedButton(
+                            OutlinedButton(
                                 onClick = {
-                                    com.recai.app.ui.util.PhoneActionHelper.openDialer(context, phoneNumber)
-                                }
+                                    val success = PhoneActionHelper.openDialer(context, phoneNumber)
+                                    if (!success) {
+                                        coroutineScope.launch {
+                                            snackbarHostState.showSnackbar("Unable to open dialer")
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
                             ) {
                                 Text("Call")
                             }
 
-                            if (!com.recai.app.ui.util.PhoneActionHelper.isKnownCaller(callerName, phoneNumber)) {
-                                androidx.compose.material3.OutlinedButton(
-                                    onClick = {
-                                        com.recai.app.ui.util.PhoneActionHelper.openAddContact(context, phoneNumber, callerName)
+                            OutlinedButton(
+                                onClick = {
+                                    val success = PhoneActionHelper.openSms(context, phoneNumber)
+                                    if (!success) {
+                                        coroutineScope.launch {
+                                            snackbarHostState.showSnackbar("Unable to open messaging app")
+                                        }
                                     }
-                                ) {
-                                    Text("Add to contacts")
-                                }
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Message")
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    when (PhoneActionHelper.openWhatsApp(context, phoneNumber)) {
+                                        WhatsAppLaunchResult.SUCCESS -> {}
+                                        WhatsAppLaunchResult.NOT_INSTALLED -> {
+                                            coroutineScope.launch {
+                                                snackbarHostState.showSnackbar("WhatsApp is not installed.")
+                                            }
+                                        }
+                                        WhatsAppLaunchResult.INVALID_NUMBER -> {
+                                            coroutineScope.launch {
+                                                snackbarHostState.showSnackbar("Invalid phone number for WhatsApp.")
+                                            }
+                                        }
+                                        WhatsAppLaunchResult.FAILED -> {
+                                            coroutineScope.launch {
+                                                snackbarHostState.showSnackbar("Unable to open WhatsApp.")
+                                            }
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("WhatsApp")
+                            }
+                        }
+
+                        if (!PhoneActionHelper.isKnownCaller(callerName, phoneNumber)) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedButton(
+                                onClick = {
+                                    val success = PhoneActionHelper.openAddContact(context, phoneNumber, callerName)
+                                    if (!success) {
+                                        coroutineScope.launch {
+                                            snackbarHostState.showSnackbar("Unable to open Contacts")
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Add to contacts")
                             }
                         }
                     }
 
                     // Tracking state & control
-                    if (com.recai.app.ui.util.PhoneActionHelper.isActionablePhoneNumber(phoneNumber)) {
+                    if (PhoneActionHelper.isActionablePhoneNumber(phoneNumber)) {
                         Spacer(modifier = Modifier.height(12.dp))
-                        androidx.compose.foundation.layout.Row(
+                        Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
@@ -354,13 +417,13 @@ fun ConversationDetailScreen(
                                 )
                             }
                             if (isTracked) {
-                                androidx.compose.material3.TextButton(
+                                TextButton(
                                     onClick = { showRemoveTrackingDialog = true }
                                 ) {
                                     Text("Remove from tracking")
                                 }
                             } else {
-                                androidx.compose.material3.FilledTonalButton(
+                                FilledTonalButton(
                                     onClick = {
                                         coroutineScope.launch {
                                             trackingRepo.setTrackingEnabled(phoneNumber ?: "", true)
@@ -424,7 +487,7 @@ fun ConversationDetailScreen(
                     ) { recording ->
                         AudioFileItem(
                             audioFile = recording,
-                            onClick = { onRecordingClick(recording) }
+                            onClick = { onRecordingClick(recording, currentSortOrder) }
                         )
                     }
                 }

@@ -15,7 +15,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -34,6 +36,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -64,6 +67,9 @@ import com.recai.app.ui.player.AudioPlaybackHelper
 import com.recai.app.ui.player.AudioPlayerController
 import com.recai.app.ui.theme.RecAITheme
 import com.recai.app.ui.util.PhoneActionHelper
+import com.recai.app.ui.util.RecordingActionHelper
+import com.recai.app.ui.util.RecordingNavigationHelper
+import com.recai.app.ui.util.WhatsAppLaunchResult
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.time.LocalDateTime
@@ -75,9 +81,12 @@ import java.util.Locale
 @Composable
 fun RecordingDetailScreen(
     audioFile: AudioFile,
+    recordings: List<AudioFile> = listOf(audioFile),
     modifier: Modifier = Modifier,
     onBackClick: () -> Unit = {},
-    onManageTrackingClick: () -> Unit = {}
+    onManageTrackingClick: () -> Unit = {},
+    onNavigateToRecording: (AudioFile) -> Unit = {},
+    onRecordingDeleted: ((deletedFile: AudioFile) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -111,6 +120,9 @@ fun RecordingDetailScreen(
     // Playback speed dropdown state
     var isSpeedMenuExpanded by remember { mutableStateOf(false) }
 
+    // Delete confirmation dialog state
+    var showDeleteDialog by remember { mutableStateOf(false) }
+
     val metadata = audioFile.metadata
     val callerName = metadata?.callerName ?: "Unknown caller"
     val phoneNumber = metadata?.phoneNumber
@@ -124,6 +136,52 @@ fun RecordingDetailScreen(
     }.joinToString(" • ")
 
     val originalFilename = metadata?.originalFileName ?: audioFile.name
+
+    // Previous / Next playlist indexing
+    val currentIndex = remember(recordings, audioFile) {
+        RecordingNavigationHelper.calculateCurrentIndex(recordings, audioFile)
+    }
+    val hasPrevious = remember(currentIndex) {
+        RecordingNavigationHelper.hasPrevious(currentIndex)
+    }
+    val hasNext = remember(currentIndex, recordings.size) {
+        RecordingNavigationHelper.hasNext(currentIndex, recordings.size)
+    }
+
+    // Delete Confirmation Dialog
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Delete recording?") },
+            text = {
+                Text("Are you sure you want to permanently delete this recording?\n\nThis action cannot be undone.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteDialog = false
+                        val uri = audioFile.uri
+                        val success = RecordingActionHelper.deleteRecording(context, uri)
+                        if (success) {
+                            playerController.release()
+                            onRecordingDeleted?.invoke(audioFile)
+                        } else {
+                            coroutineScope.launch {
+                                snackbarHostState.showSnackbar("Could not delete recording.")
+                            }
+                        }
+                    }
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
     // Surface playback errors via Snackbar
     LaunchedEffect(playerState.errorMessage) {
@@ -223,7 +281,7 @@ fun RecordingDetailScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
             // 2. Playback Error Alert (if any)
             if (playerState.errorMessage != null) {
@@ -382,48 +440,181 @@ fun RecordingDetailScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
-
-            // 4. Actions Section (Call / Add to contacts)
-            if (PhoneActionHelper.isActionablePhoneNumber(phoneNumber)) {
-                SectionHeader(title = "Actions")
-                Card(
+            // 4. Previous / Next Recording Navigation
+            if (recordings.size > 1) {
+                Spacer(modifier = Modifier.height(18.dp))
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-                    )
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    OutlinedButton(
+                        onClick = {
+                            if (hasPrevious && currentIndex > 0) {
+                                onNavigateToRecording(recordings[currentIndex - 1])
+                            }
+                        },
+                        enabled = hasPrevious,
+                        shape = RoundedCornerShape(20.dp)
                     ) {
-                        OutlinedButton(
-                            onClick = {
-                                PhoneActionHelper.openDialer(context, phoneNumber)
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Call")
-                        }
+                        Text("← Previous")
+                    }
 
-                        if (!PhoneActionHelper.isKnownCaller(callerName, phoneNumber)) {
+                    Text(
+                        text = "${if (currentIndex >= 0) currentIndex + 1 else 1} of ${recordings.size}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    OutlinedButton(
+                        onClick = {
+                            if (hasNext && currentIndex in 0 until recordings.size - 1) {
+                                onNavigateToRecording(recordings[currentIndex + 1])
+                            }
+                        },
+                        enabled = hasNext,
+                        shape = RoundedCornerShape(20.dp)
+                    ) {
+                        Text("Next →")
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // 5. Actions Section (Call, Message, WhatsApp, Share, Delete, Add to contacts)
+            SectionHeader(title = "Actions")
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                )
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    val hasActionablePhone = PhoneActionHelper.isActionablePhoneNumber(phoneNumber)
+                    val isUnknownCaller = hasActionablePhone && !PhoneActionHelper.isKnownCaller(callerName, phoneNumber)
+
+                    if (hasActionablePhone) {
+                        // Row 1: Direct communication actions
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             OutlinedButton(
                                 onClick = {
-                                    PhoneActionHelper.openAddContact(context, phoneNumber, callerName)
+                                    val success = PhoneActionHelper.openDialer(context, phoneNumber)
+                                    if (!success) {
+                                        coroutineScope.launch {
+                                            snackbarHostState.showSnackbar("Unable to open dialer")
+                                        }
+                                    }
                                 },
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Text("Add to contacts")
+                                Text("Call")
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    val success = PhoneActionHelper.openSms(context, phoneNumber)
+                                    if (!success) {
+                                        coroutineScope.launch {
+                                            snackbarHostState.showSnackbar("Unable to open messaging app")
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Message")
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    when (PhoneActionHelper.openWhatsApp(context, phoneNumber)) {
+                                        WhatsAppLaunchResult.SUCCESS -> {}
+                                        WhatsAppLaunchResult.NOT_INSTALLED -> {
+                                            coroutineScope.launch {
+                                                snackbarHostState.showSnackbar("WhatsApp is not installed.")
+                                            }
+                                        }
+                                        WhatsAppLaunchResult.INVALID_NUMBER -> {
+                                            coroutineScope.launch {
+                                                snackbarHostState.showSnackbar("Invalid phone number for WhatsApp.")
+                                            }
+                                        }
+                                        WhatsAppLaunchResult.FAILED -> {
+                                            coroutineScope.launch {
+                                                snackbarHostState.showSnackbar("Unable to open WhatsApp.")
+                                            }
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("WhatsApp")
                             }
                         }
                     }
+
+                    // Row 2: Add to contacts if unknown caller
+                    if (isUnknownCaller) {
+                        OutlinedButton(
+                            onClick = {
+                                val success = PhoneActionHelper.openAddContact(context, phoneNumber, callerName)
+                                if (!success) {
+                                    coroutineScope.launch {
+                                        snackbarHostState.showSnackbar("Unable to open Contacts")
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Add to contacts")
+                        }
+                    }
+
+                    // Row 3: Share and Delete file actions
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                val success = RecordingActionHelper.shareRecording(context, audioFile)
+                                if (!success) {
+                                    coroutineScope.launch {
+                                        snackbarHostState.showSnackbar("Unable to share recording")
+                                    }
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Share")
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                showDeleteDialog = true
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error
+                            )
+                        ) {
+                            Text("Delete")
+                        }
+                    }
                 }
-                Spacer(modifier = Modifier.height(20.dp))
             }
 
-            // 5. Tracking Section
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // 6. Tracking Section
             if (PhoneActionHelper.isActionablePhoneNumber(phoneNumber)) {
                 SectionHeader(title = "Tracking")
                 Card(
@@ -455,7 +646,7 @@ fun RecordingDetailScreen(
                 Spacer(modifier = Modifier.height(20.dp))
             }
 
-            // 6. Recording Information Section
+            // 7. Recording Information Section
             SectionHeader(title = "Recording information")
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -496,7 +687,7 @@ fun RecordingDetailScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // 7. Original File Section
+            // 8. Original File Section
             SectionHeader(title = "Original file")
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -520,7 +711,7 @@ fun RecordingDetailScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            // 8. Analyse Recording Button
+            // 9. Analyse Recording Button
             Button(
                 onClick = {
                     coroutineScope.launch {

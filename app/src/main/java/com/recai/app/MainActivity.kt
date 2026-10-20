@@ -28,6 +28,8 @@ import androidx.core.content.ContextCompat
 import com.recai.app.data.model.AudioFile
 import com.recai.app.data.model.Conversation
 import com.recai.app.data.parser.PhoneNumberMatcher
+import com.recai.app.data.model.SortOrder
+import com.recai.app.data.storage.ConversationFilterHelper
 import com.recai.app.data.storage.FileRepository
 import com.recai.app.data.storage.FolderPreferences
 import com.recai.app.ui.screens.ConversationDetailScreen
@@ -37,6 +39,7 @@ import com.recai.app.ui.screens.HomeScreen
 import com.recai.app.ui.screens.RecordingDetailScreen
 import com.recai.app.ui.screens.TrackingScreen
 import com.recai.app.ui.theme.RecAITheme
+import com.recai.app.ui.util.RecordingNavigationHelper
 import kotlinx.coroutines.launch
 
 private enum class Screen {
@@ -82,6 +85,7 @@ class MainActivity : ComponentActivity() {
                 var currentScreen by remember { mutableStateOf(Screen.HOME) }
                 var selectedConversation by remember { mutableStateOf<Conversation?>(null) }
                 var selectedAudioFile by remember { mutableStateOf<AudioFile?>(null) }
+                var conversationSortOrder by remember { mutableStateOf(SortOrder.NEWEST_FIRST) }
                 val storedUriString by folderPreferences.folderUriFlow.collectAsState(initial = null)
                 var displayFolderName by remember { mutableStateOf<String?>(null) }
                 var conversationsState by remember { mutableStateOf<ConversationsUiState>(ConversationsUiState.Loading) }
@@ -310,8 +314,9 @@ class MainActivity : ComponentActivity() {
                                 onBackClick = {
                                     currentScreen = Screen.CONVERSATIONS
                                 },
-                                onRecordingClick = { recording ->
+                                onRecordingClick = { recording, sortOrder ->
                                     selectedAudioFile = recording
+                                    conversationSortOrder = sortOrder
                                     currentScreen = Screen.RECORDING_DETAIL
                                 }
                             )
@@ -322,18 +327,66 @@ class MainActivity : ComponentActivity() {
 
                     Screen.RECORDING_DETAIL -> {
                         val audio = selectedAudioFile
-                        if (audio != null) {
+                        val conversation = selectedConversation
+                        if (audio != null && conversation != null) {
+                            val orderedRecordings = ConversationFilterHelper.sortRecordings(
+                                recordings = conversation.recordings,
+                                sortOrder = conversationSortOrder
+                            )
+
                             BackHandler {
                                 currentScreen = Screen.CONVERSATION_DETAIL
                             }
 
                             RecordingDetailScreen(
                                 audioFile = audio,
+                                recordings = orderedRecordings,
                                 onBackClick = {
                                     currentScreen = Screen.CONVERSATION_DETAIL
                                 },
                                 onManageTrackingClick = {
                                     currentScreen = Screen.TRACKING
+                                },
+                                onNavigateToRecording = { targetAudio ->
+                                    selectedAudioFile = targetAudio
+                                },
+                                onRecordingDeleted = { deleted ->
+                                    val target = RecordingNavigationHelper.findTargetAfterDeletion(
+                                        recordings = orderedRecordings,
+                                        deletedFile = deleted
+                                    )
+                                    val remaining = conversation.recordings.filterNot {
+                                        (it.uri != null && it.uri == deleted.uri) || it.name == deleted.name
+                                    }
+                                    val updatedConv = conversation.copy(recordings = remaining)
+                                    selectedConversation = updatedConv
+
+                                    // Update in-memory conversationsState
+                                    val currentState = conversationsState
+                                    if (currentState is ConversationsUiState.Success) {
+                                        val updatedConversations = currentState.conversations.map {
+                                            if (it.id == updatedConv.id) updatedConv else it
+                                        }.filter { it.recordingCount > 0 }
+                                        conversationsState = ConversationsUiState.Success(updatedConversations)
+                                    }
+
+                                    if (target != null) {
+                                        selectedAudioFile = target
+                                    } else {
+                                        selectedAudioFile = null
+                                        currentScreen = Screen.CONVERSATION_DETAIL
+                                    }
+
+                                    // Refresh from SAF in background
+                                    storedUriString?.let { uriStr ->
+                                        coroutineScope.launch {
+                                            val res = fileRepository.getConversations(Uri.parse(uriStr))
+                                            res.getOrNull()?.let { refreshed ->
+                                                conversationsState = ConversationsUiState.Success(refreshed)
+                                                selectedConversation = refreshed.firstOrNull { it.id == updatedConv.id }
+                                            }
+                                        }
+                                    }
                                 }
                             )
                         } else {

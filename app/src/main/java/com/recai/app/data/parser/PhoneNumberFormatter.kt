@@ -17,7 +17,7 @@ object PhoneNumberFormatter {
      * Null or blank inputs return [fallback].
      */
     fun format(rawNumber: String?, fallback: String = DEFAULT_FALLBACK): String {
-        if (rawNumber.isNullOrBlank()) {
+        if (rawNumber.isNullOrBlank() || rawNumber.trim().equals("null", ignoreCase = true)) {
             return fallback
         }
 
